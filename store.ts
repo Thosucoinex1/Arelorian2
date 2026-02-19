@@ -116,19 +116,63 @@ export const useStore = create<GameState>((set, get) => ({
         id: 'a2', name: 'Rogue-X', classType: 'Mercenary', faction: 'PLAYER', position: [10, 0, 10], rotationY: 0, level: 1, xp: 0, insightPoints: 5, visionLevel: 1, visionRange: 40, state: AgentState.IDLE, soulDensity: 1, gold: 500, integrity: 1, energy: 100, maxEnergy: 100, dna: { hash: '0x456', generation: 1, corruption: 0.1 }, memoryCache: [], thinkingMatrix: { personality: 'Aggressive', currentLongTermGoal: 'Wealth', alignment: -10, languagePreference: 'EN', aggression: 0.8, reputation: -5, infamy: 10 }, skills: {}, inventory: [], bank: [], equipment: { mainHand: null, offHand: null, head: null, chest: null, legs: null }, stats: { str: 15, agi: 12, int: 8, vit: 12, hp: 120, maxHp: 120 }, lastScanTime: 0, tasks: []
       }
     ];
-    set({ pois: initialPOIs, agents: initialAgents, resourceNodes: initialResources });
+    const initialMonsters: Monster[] = [
+      { id: 'm1', type: 'SLIME', name: 'Void Slime', position: [15, 0, -15], rotationY: 0, stats: { hp: 30, maxHp: 30, atk: 3, def: 1 }, xpReward: 15, state: 'IDLE', targetId: null, color: '#22c55e', scale: 0.5 },
+      { id: 'm2', type: 'GOBLIN', name: 'Scavenger', position: [-15, 0, 15], rotationY: 0, stats: { hp: 60, maxHp: 60, atk: 8, def: 3 }, xpReward: 40, state: 'IDLE', targetId: null, color: '#84cc16', scale: 0.8 }
+    ];
+    set({ pois: initialPOIs, agents: initialAgents, resourceNodes: initialResources, monsters: initialMonsters });
   },
 
   updatePhysics: (delta) => {
-    const { agents, resourceNodes, pois, monsters } = get();
+    const { agents, resourceNodes, pois, monsters, addLog } = get();
     
-    const updatedAgents = agents.map(agent => {
-      let { position, state, targetId } = agent;
-      const speed = 2 * delta;
+    // Update Monsters
+    const updatedMonsters = monsters.map(monster => {
+      let { position, state, targetId } = monster;
+      const speed = 1 * delta;
       
-      // Simple movement logic
+      if (state === 'DEAD') return monster;
+
+      // Find nearest agent if idle
+      if (state === 'IDLE') {
+        const nearestAgent = agents.find(a => Math.hypot(a.position[0] - position[0], a.position[2] - position[2]) < 10);
+        if (nearestAgent) {
+          state = 'COMBAT';
+          targetId = nearestAgent.id;
+        }
+      }
+
+      if (state === 'COMBAT' && targetId) {
+        const target = agents.find(a => a.id === targetId);
+        if (target) {
+          const dx = target.position[0] - position[0];
+          const dz = target.position[2] - position[2];
+          const dist = Math.hypot(dx, dz);
+          if (dist > 1.5) {
+            position = [position[0] + (dx / dist) * speed, position[1], position[2] + (dz / dist) * speed];
+          } else {
+            // Attack logic (simplified)
+            if (Math.random() < 0.01) {
+              const damage = Math.max(1, monster.stats.atk - Math.floor(target.stats.vit / 2));
+              // In a real app we'd update agent HP here, but for now just log
+              // addLog(`${monster.name} hit ${target.name} for ${damage}`, 'COMBAT');
+            }
+          }
+        } else {
+          state = 'IDLE';
+          targetId = null;
+        }
+      }
+
+      return { ...monster, position, state, targetId };
+    });
+
+    // Update Agents
+    const updatedAgents = agents.map(agent => {
+      let { position, state, targetId, xp, level, stats, gold } = agent;
+      const speed = (2 + (agent.stats.agi / 10)) * delta;
+      
       if (state === AgentState.EXPLORING) {
-        // Move towards nearest undiscovered POI
         const targetPOI = pois.find(p => !p.isDiscovered);
         if (targetPOI) {
           const dx = targetPOI.position[0] - position[0];
@@ -137,26 +181,31 @@ export const useStore = create<GameState>((set, get) => ({
           if (dist > 1) {
             position = [position[0] + (dx / dist) * speed, position[1], position[2] + (dz / dist) * speed];
           } else {
-            // Discover POI
             set(s => ({
               pois: s.pois.map(p => p.id === targetPOI.id ? { ...p, isDiscovered: true } : p)
             }));
-            get().addLog(`${agent.name} discovered ${targetPOI.type}`, 'EVENT', agent.name);
+            addLog(`${agent.name} discovered ${targetPOI.type}`, 'EVENT', agent.name);
+            xp += 20;
           }
         }
       } else if (state === AgentState.GATHERING) {
-        // Move towards nearest resource
-        const targetRes = resourceNodes[0]; // Simplified
+        const targetRes = resourceNodes[0];
         if (targetRes) {
           const dx = targetRes.position[0] - position[0];
           const dz = targetRes.position[2] - position[2];
           const dist = Math.hypot(dx, dz);
-          if (dist > 1) {
+          if (dist > 1.5) {
             position = [position[0] + (dx / dist) * speed, position[1], position[2] + (dz / dist) * speed];
+          } else {
+            // Gathering logic
+            if (Math.random() < 0.05) {
+              const amount = 1 + Math.floor(agent.stats.str / 5);
+              gold += amount * 2;
+              xp += 5;
+            }
           }
         }
       } else if (state === AgentState.COMBAT) {
-        // Move towards target
         const target = agents.find(a => a.id === targetId) || monsters.find(m => m.id === targetId);
         if (target) {
           const dx = target.position[0] - position[0];
@@ -164,15 +213,29 @@ export const useStore = create<GameState>((set, get) => ({
           const dist = Math.hypot(dx, dz);
           if (dist > 2) {
             position = [position[0] + (dx / dist) * speed, position[1], position[2] + (dz / dist) * speed];
+          } else {
+            // Combat logic
+            if (Math.random() < 0.02) {
+              xp += 10;
+            }
           }
         }
       }
       
-      return { ...agent, position };
+      // Level up logic
+      if (xp >= level * 100) {
+        xp -= level * 100;
+        level += 1;
+        stats = { ...stats, maxHp: stats.maxHp + 20, hp: stats.maxHp + 20, str: stats.str + 2, agi: stats.agi + 2 };
+        addLog(`${agent.name} reached Level ${level}!`, 'AXIOM', agent.name);
+      }
+
+      return { ...agent, position, xp, level, stats, gold };
     });
 
     set(s => ({ 
       agents: updatedAgents,
+      monsters: updatedMonsters,
       serverStats: { ...s.serverStats, uptime: s.serverStats.uptime + delta } 
     }));
   },

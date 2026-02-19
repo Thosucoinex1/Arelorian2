@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, Suspense } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Text, Float, MeshDistortMaterial } from '@react-three/drei';
+import { OrbitControls, Stars, Text, Float, MeshDistortMaterial, Line } from '@react-three/drei';
 import { useStore } from './store';
-import { Agent, Monster, ResourceNode, POI, ChatChannel, ResourceType } from './types';
+import { Agent, Monster, ResourceNode, POI, ChatChannel, ResourceType, AgentState } from './types';
 import { Terminal, Shield, Zap, Database, Activity, Map as MapIcon, ShoppingCart, User, MessageSquare, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -58,6 +58,37 @@ const World = () => {
           <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.5} />
         </mesh>
       ))}
+
+      {/* Monsters */}
+      {monsters.map((monster) => (
+        <mesh key={monster.id} position={monster.position}>
+          <dodecahedronGeometry args={[monster.scale]} />
+          <meshStandardMaterial color={monster.color} emissive={monster.color} emissiveIntensity={0.5} />
+          <Text position={[0, monster.scale + 0.5, 0]} fontSize={0.2} color="white">
+            {monster.name} ({monster.stats.hp} HP)
+          </Text>
+        </mesh>
+      ))}
+
+      {/* Action Indicators */}
+      {agents.map(agent => {
+        if (agent.state === AgentState.GATHERING) {
+          const target = resourceNodes[0];
+          if (target) {
+            return (
+              <Line 
+                key={`line-${agent.id}`}
+                points={[agent.position, target.position]}
+                color="#22c55e"
+                lineWidth={1}
+                transparent
+                opacity={0.3}
+              />
+            );
+          }
+        }
+        return null;
+      })}
 
       <gridHelper args={[100, 100, "#222", "#111"]} />
     </>
